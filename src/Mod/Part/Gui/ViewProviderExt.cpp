@@ -453,6 +453,9 @@ void ViewProviderPartExt::onChanged(const App::Property* prop)
             ShapeMaterial.setContainer(0);
             ShapeMaterial.setTransparency(trans);
             ShapeMaterial.setContainer(parent);
+
+            Gui::SoUpdateVBOAction action;
+            action.apply(this->faceset);
         }
     }
     else if (prop == &Lighting) {
