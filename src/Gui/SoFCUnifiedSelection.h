@@ -101,6 +101,8 @@ public:
 
     static int getPriority(const SoPickedPoint* p);
 
+    static bool getShowSelectionBoundingBox();
+
     friend class View3DInventorViewer;
 
 protected:
@@ -149,6 +151,8 @@ private:
     SoFullPath * detailPath;
 
     SbBool setPreSelection;
+
+    bool selectAll;
 
     // -1 = not handled, 0 = not selected, 1 = selected
     int32_t preSelection;
