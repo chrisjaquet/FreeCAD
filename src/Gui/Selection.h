@@ -627,6 +627,9 @@ public:
             const char* pDocName=0, Base::Type typeId=App::DocumentObject::getClassTypeId()) const;
     //@}
 
+    // Check if obj can be considered as a top level object
+    static void checkTopParent(App::DocumentObject *&obj, std::string &subname);
+
     static SelectionSingleton& instance(void);
     static void destruct (void);
     friend class SelectionFilter;
@@ -660,6 +663,7 @@ protected:
     static PyObject *sHasSelection        (PyObject *self,PyObject *args);
     static PyObject *sHasSubSelection     (PyObject *self,PyObject *args);
     static PyObject *sGetSelectionFromStack(PyObject *self,PyObject *args);
+    static PyObject *sCheckTopParent      (PyObject *self,PyObject *args);
 
 protected:
     /// Construction
@@ -761,6 +765,14 @@ public:
     }
 private:
     bool silent;
+};
+
+/// Helper class to disable top parent check when adding selection
+class GuiExport SelectionNoTopParentCheck {
+public:
+    SelectionNoTopParentCheck();
+    ~SelectionNoTopParentCheck();
+    static bool enabled();
 };
 
 } //namespace Gui
