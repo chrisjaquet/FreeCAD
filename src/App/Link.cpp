@@ -302,7 +302,7 @@ int LinkBaseExtension::_getElementCountValue() const {
 }
 
 bool LinkBaseExtension::extensionHasChildElement() const {
-    if(_getElementListProperty() || _getElementCountValue())
+    if(_getElementListValue().size() || _getElementCountValue())
         return true;
     DocumentObject *linked = getTrueLinkedObject(false);
     if(linked) {
@@ -315,6 +315,14 @@ bool LinkBaseExtension::extensionHasChildElement() const {
 int LinkBaseExtension::extensionSetElementVisible(const char *element, bool visible) {
     int index = _getShowElementValue()?getElementIndex(element):getArrayIndex(element);
     if(index>=0) {
+        if(getSyncGroupVisibilityValue() && linkedPlainGroup()) {
+            const auto &elements = _getElementListValue();
+            if(index<(int)elements.size()) {
+                elements[index]->Visibility.setValue(visible);
+                return 1;
+            }
+            return -1;
+        }
         auto propElementVis = getVisibilityListProperty();
         if(!propElementVis || !element || !element[0]) 
             return -1;
@@ -343,6 +351,15 @@ int LinkBaseExtension::extensionSetElementVisible(const char *element, bool visi
 int LinkBaseExtension::extensionIsElementVisible(const char *element) const {
     int index = _getShowElementValue()?getElementIndex(element):getArrayIndex(element);
     if(index>=0) {
+        if(getSyncGroupVisibilityValue() && linkedPlainGroup()) {
+            const auto &elements = _getElementListValue();
+            if(index<(int)elements.size()) {
+                auto group = App::GroupExtension::getGroupOfObject(elements[index]);
+                if(group)
+                    return group->isElementVisible(elements[index]->getNameInDocument());
+            }
+            return -1;
+        }
         auto propElementVis = getVisibilityListProperty();
         if(propElementVis) {
             if(propElementVis->getSize()<=index || propElementVis->getValues()[index])
@@ -354,6 +371,32 @@ int LinkBaseExtension::extensionIsElementVisible(const char *element) const {
     DocumentObject *linked = getTrueLinkedObject(false);
     if(linked)
         return linked->isElementVisible(element);
+    return -1;
+}
+
+int LinkBaseExtension::extensionIsElementVisibleEx(const char *element, int reason) const {
+    int index = _getShowElementValue()?getElementIndex(element):getArrayIndex(element);
+    if(index>=0) {
+        if(getSyncGroupVisibilityValue() && linkedPlainGroup()) {
+            const auto &elements = _getElementListValue();
+            if(index<(int)elements.size()) {
+                auto group = App::GroupExtension::getGroupOfObject(elements[index]);
+                if(group)
+                    return group->isElementVisibleEx(elements[index]->getNameInDocument(),reason);
+            }
+            return -1;
+        }
+        auto propElementVis = getVisibilityListProperty();
+        if(propElementVis) {
+            if(propElementVis->getSize()<=index || propElementVis->getValues()[index])
+                return 1;
+            return 0;
+        }
+        return -1;
+    }
+    DocumentObject *linked = getTrueLinkedObject(false);
+    if(linked)
+        return linked->isElementVisibleEx(element,reason);
     return -1;
 }
 
@@ -806,6 +849,10 @@ void LinkBaseExtension::updateGroup() {
         for(auto ext : groups) {
             plainGroupConns.push_back(ext->Group.signalChanged.connect(
                         boost::bind(&LinkBaseExtension::updateGroup,this)));
+            if(getSyncGroupVisibilityValue())
+                plainGroupConns.push_back(ext->_GroupTouched.signalChanged.connect(
+                            boost::bind(&LinkBaseExtension::updateGroupVisibility,this)));
+
             std::size_t count = children.size();
             ext->getAllChildren(children,childSet);
             for(;count<children.size();++count) {
@@ -815,11 +862,20 @@ void LinkBaseExtension::updateGroup() {
                     continue;
                 plainGroupConns.push_back(childGroup->Group.signalChanged.connect(
                             boost::bind(&LinkBaseExtension::updateGroup,this)));
+                if(getSyncGroupVisibilityValue())
+                    plainGroupConns.push_back(childGroup->_GroupTouched.signalChanged.connect(
+                                boost::bind(&LinkBaseExtension::updateGroupVisibility,this)));
             }
         }
     }
     if(children != _ChildCache.getValues())
         _ChildCache.setValue(children);
+    updateGroupVisibility();
+}
+
+void LinkBaseExtension::updateGroupVisibility() {
+    if(getSyncGroupVisibilityValue())
+        _LinkTouched.touch();
 }
 
 void LinkBaseExtension::update(App::DocumentObject *parent, const Property *prop) {
@@ -1050,6 +1106,9 @@ void LinkBaseExtension::update(App::DocumentObject *parent, const Property *prop
             getElementCountProperty()->setValue(
                     getElementListProperty()->getSize());
         }
+    }else if(prop == getSyncGroupVisibilityProperty()) {
+        if(linkedPlainGroup())
+            updateGroup();
     }else if(prop == getLinkedObjectProperty()) {
         auto group = linkedPlainGroup();
         if(getShowElementProperty())
