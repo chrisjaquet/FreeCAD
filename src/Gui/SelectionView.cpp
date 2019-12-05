@@ -32,12 +32,17 @@
  #include <QCheckBox>
 # include <QMenu>
 # include <QLabel>
+# include <QApplication>
 #endif
+
+#include <QHelpEvent>
+#include <QToolTip>
 
 /// Here the FreeCAD includes sorted by Base,App,Gui......
 #include <Base/Console.h>
 #include <App/Document.h>
 #include <App/GeoFeature.h>
+#include <App/DocumentObserver.h>
 #include "SelectionView.h"
 #include "Command.h"
 #include "Application.h"
@@ -49,7 +54,6 @@ FC_LOG_LEVEL_INIT("Selection",true,true,true)
 
 using namespace Gui;
 using namespace Gui::DockWnd;
-
 
 /* TRANSLATOR Gui::DockWnd::SelectionView */
 
@@ -400,16 +404,7 @@ void SelectionView::preselect(QListWidgetItem* item)
         char *end = std::strchr(objname,' ');
         if(end) *end = 0;
     }
-    QString cmd = QString::fromLatin1("Gui.Selection.setPreselection("
-        "App.getDocument('%1').getObject('%2'),'%3',tp=2)")
-        .arg(QString::fromLatin1(docname))
-        .arg(QString::fromLatin1(objname))
-        .arg(QString::fromLatin1(subname));
-    try {
-        Gui::Command::runCommand(Gui::Command::Gui,cmd.toLatin1());
-    }catch(Base::Exception &e) {
-        e.ReportException();
-    }
+    Gui::Selection().setPreselect(docname,objname,subname,0,0,0,2);
 }
 
 void SelectionView::zoom(void)
@@ -626,5 +621,190 @@ void SelectionView::onEnablePickList() {
 }
 
 /// @endcond
+
+////////////////////////////////////////////////////////////////////////
+
+SelectionMenu::SelectionMenu(QWidget *parent)
+    :QMenu(parent),pSelList(0)
+{}
+
+struct ElementInfo {
+    QMenu *menu = nullptr;
+    std::vector<int> indices;
+};
+
+struct SubMenuInfo {
+    QMenu *menu = nullptr;
+
+    // Map from sub-object label to map from object path to element info The
+    // reason of the second map is to disambiguate sub-object with the same
+    // label, but different object or object path
+    std::map<std::string, std::map<std::string, ElementInfo> > items;
+};
+
+void SelectionMenu::doPick(const std::vector<App::SubObjectT> &sels) {
+    clear();
+    setStyleSheet(QLatin1String("* { menu-scrollable: 1 }"));
+
+    pSelList = &sels;
+    std::ostringstream ss;
+    std::map<std::string, SubMenuInfo> menus;
+
+    int i=0;
+    for(auto &sel : sels) {
+        auto sobj = sel.getSubObject();
+        if(!sobj)
+            continue;
+
+        ss.str("");
+        int index = -1;
+        std::string element = sel.getOldElementName(&index);
+        if(index < 0)
+            continue;
+        ss << sel.getObjectName() << '.' << sel.getSubNameNoElement();
+        std::string key = ss.str();
+
+        menus[element].items[sobj->Label.getStrValue()][key].indices.push_back(i++);
+    }
+
+    for(auto &v : menus) {
+        auto &info = v.second;
+        info.menu = addMenu(QLatin1String(v.first.c_str()));
+
+        for(auto &vv : info.items) {
+            const std::string &label = vv.first;
+
+            for(auto &vvv : vv.second) {
+                auto &elementInfo = vvv.second;
+
+                if(sels.size() <= 20) {
+                    for(int idx : elementInfo.indices) {
+                        ss.str("");
+                        ss << label << " (" << sels[idx].getOldElementName() << ")";
+                        QAction *action = info.menu->addAction(QString::fromUtf8(ss.str().c_str()));
+                        action->setData(idx);
+                    }
+                    continue;
+                }
+                if(!elementInfo.menu) {
+                    elementInfo.menu = info.menu->addMenu(QString::fromUtf8(label.c_str()));
+                    connect(elementInfo.menu, SIGNAL(aboutToShow()),this,SLOT(onSubMenu()));
+                }
+                for(int idx : elementInfo.indices) {
+                    QAction *action = elementInfo.menu->addAction(
+                            QString::fromUtf8(sels[idx].getOldElementName().c_str()));
+                    action->setData(idx);
+                }
+            }
+        }
+    }
+    bool toggle = !Gui::Selection().needPickedList();
+    if(toggle)
+        Gui::Selection().enablePickedList(true);
+
+    Gui::Selection().rmvPreselect();
+
+    timer.setSingleShot(true);
+    connect(&timer, SIGNAL(timeout()), this, SLOT(onTimer()));
+
+    connect(this, SIGNAL(hovered(QAction*)), this, SLOT(onHover(QAction*)));
+    QAction* picked = exec(QCursor::pos());
+
+    timer.stop();
+    QToolTip::hideText();
+
+    if(picked) {
+        int idx = picked->data().toInt();
+        auto &sel = sels[idx];
+
+        bool ctrl = (QApplication::queryKeyboardModifiers() == Qt::ControlModifier);
+        if(!ctrl) {
+            if(TreeParams::Instance()->RecordSelection())
+                Gui::Selection().selStackPush();
+            Gui::Selection().clearSelection();
+        }
+        Gui::Selection().addSelection(sel.getDocumentName().c_str(),
+                sel.getObjectName().c_str(), sel.getSubName().c_str());
+        if(TreeParams::Instance()->RecordSelection())
+            Gui::Selection().selStackPush(false,ctrl);
+    }
+    pSelList = 0;
+    if(toggle)
+        Gui::Selection().enablePickedList(false);
+}
+
+void SelectionMenu::onHover(QAction *action) {
+    timer.stop();
+    QToolTip::hideText();
+
+    if(!pSelList)
+        return;
+    int idx = action->data().toInt();
+    if(idx<0 || idx>=(int)pSelList->size())
+        return;
+    auto &sel = (*pSelList)[idx];
+    Gui::Selection().setPreselect(sel.getDocumentName().c_str(),
+            sel.getObjectName().c_str(), sel.getSubName().c_str(),0,0,0,2);
+    timer.start(500);
+    tooltipIndex = idx;
+}
+
+void SelectionMenu::leaveEvent(QEvent *event) {
+    timer.stop();
+    QToolTip::hideText();
+    QMenu::leaveEvent(event);
+}
+
+void SelectionMenu::onTimer() {
+    bool needElement = tooltipIndex < 0;
+    if(needElement)
+        tooltipIndex = -tooltipIndex - 1;
+
+    auto &sel = (*pSelList)[tooltipIndex];
+    auto sobj = sel.getSubObject();
+    QString tooltip;
+
+    QString element;
+    if(needElement)
+        element = QString::fromLatin1(sel.getOldElementName().c_str());
+
+    if(sobj)
+        tooltip = QString::fromLatin1("%1 (%2.%3%4)").arg(
+                        QString::fromUtf8(sobj->Label.getValue()),
+                        QString::fromLatin1(sel.getObjectName().c_str()),
+                        QString::fromLatin1(sel.getSubNameNoElement().c_str()),
+                        element);
+    else
+        tooltip = QString::fromLatin1("%1.%2%3").arg(
+                        QString::fromLatin1(sel.getObjectName().c_str()),
+                        QString::fromLatin1(sel.getSubNameNoElement().c_str()),
+                        element);
+    QToolTip::showText(QCursor::pos(), tooltip);
+}
+
+void SelectionMenu::onSubMenu() {
+    timer.stop();
+    QToolTip::hideText();
+
+    auto submenu = qobject_cast<QMenu*>(sender());
+    if(!submenu)
+        return;
+    auto actions = submenu->actions();
+    if(!actions.size())
+        return;
+    int idx = actions.front()->data().toInt();
+    if(idx<0 || idx>=(int)pSelList->size())
+        return;
+    auto &sel = (*pSelList)[idx];
+
+    const char *element = sel.getElementName();
+    std::string subname(sel.getSubName().c_str(),element);
+
+    Gui::Selection().setPreselect(sel.getDocumentName().c_str(),
+            sel.getObjectName().c_str(), subname.c_str(),0,0,0,2);
+
+    timer.start(500);
+    tooltipIndex = -idx-1;
+}
 
 #include "moc_SelectionView.cpp"
