@@ -59,6 +59,7 @@
 #include "ViewProviderExtension.h"
 #include "SoFCUnifiedSelection.h"
 #include "Tree.h"
+#include "ViewParams.h"
 #include <Gui/ViewProviderDocumentObjectPy.h>
 
 FC_LOG_LEVEL_INIT("Gui",true,true)
@@ -221,7 +222,16 @@ void ViewProviderDocumentObject::onChanged(const App::Property* prop)
 
 void ViewProviderDocumentObject::hide(void)
 {
+    auto obj = getObject();
+    if(obj && obj->getDocument() && obj->getNameInDocument() 
+           && !SelectionNoTopParentCheck::enabled())
+    {
+        Gui::Selection().updateSelection(
+                false, obj->getDocument()->getName(), obj->getNameInDocument(),0);
+    }
+
     ViewProvider::hide();
+
     // use this bit to check whether 'Visibility' must be adjusted
     if (Visibility.testStatus(App::Property::User2) == false) {
         Visibility.setStatus(App::Property::User2, true);
@@ -239,6 +249,15 @@ void ViewProviderDocumentObject::show(void)
         if(getObject())
             getObject()->Visibility.setValue(false);
         return;
+    }
+
+    if(ViewParams::instance()->getUpdateSelectionVisual()
+           && !SelectionNoTopParentCheck::enabled())
+    {
+        auto obj = getObject();
+        if(obj && obj->getDocument() && obj->getNameInDocument())
+            Gui::Selection().updateSelection(
+                    true, obj->getDocument()->getName(), obj->getNameInDocument(),0);
     }
 
     // use this bit to check whether 'Visibility' must be adjusted
