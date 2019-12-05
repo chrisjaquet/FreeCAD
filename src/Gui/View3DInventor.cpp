@@ -537,6 +537,10 @@ bool View3DInventor::onMsg(const char* pMsg, const char** ppReturn)
         _viewer->viewSelection();
         return true;
     }
+    else if(strcmp("ViewSelectionExtend",pMsg) == 0) {
+        _viewer->viewSelection(true);
+        return true;
+    }
     else if(strcmp("SetStereoRedGreen",pMsg) == 0 ) {
         _viewer->setStereoMode(Quarter::SoQTQuarterAdaptor::ANAGLYPH);
         return true;
