@@ -737,7 +737,7 @@ QVariant PropertyFontItem::value(const App::Property* prop) const
 
 void PropertyFontItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert(QVariant::String))
+    if (hasExpression() || !value.canConvert(QVariant::String))
         return;
     QString val = value.toString();
     QString data = QString::fromLatin1("\"%1\"").arg(val);
@@ -1236,7 +1236,7 @@ QVariant PropertyBoolItem::value(const App::Property* prop) const
 
 void PropertyBoolItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert(QVariant::Bool))
+    if (hasExpression() || !value.canConvert(QVariant::Bool))
         return;
     bool val = value.toBool();
     QString data = (val ? QLatin1String("True") : QLatin1String("False"));
@@ -1343,7 +1343,7 @@ QVariant PropertyVectorItem::value(const App::Property* prop) const
 
 void PropertyVectorItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert<Base::Vector3d>())
+    if (hasExpression() || !value.canConvert<Base::Vector3d>())
         return;
     const Base::Vector3d& val = value.value<Base::Vector3d>();
     QString data = QString::fromLatin1("(%1, %2, %3)")
@@ -1466,7 +1466,7 @@ QVariant PropertyVectorDistanceItem::value(const App::Property* prop) const
 
 void PropertyVectorDistanceItem::setValue(const QVariant& variant)
 {
-    if (!variant.canConvert<Base::Vector3d>())
+    if (hasExpression() || !variant.canConvert<Base::Vector3d>())
         return;
     const Base::Vector3d& value = variant.value<Base::Vector3d>();
 
@@ -1681,7 +1681,7 @@ QVariant PropertyMatrixItem::toolTip(const App::Property* prop) const
 
 void PropertyMatrixItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert<Base::Matrix4D>())
+    if (hasExpression() || !value.canConvert<Base::Matrix4D>())
         return;
     const Base::Matrix4D& val = value.value<Base::Matrix4D>();
     const int decimals=16;
@@ -2188,7 +2188,7 @@ QVariant PropertyPlacementItem::toString(const QVariant& prop) const
 
 void PropertyPlacementItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert<Base::Placement>())
+    if (hasExpression() || !value.canConvert<Base::Placement>())
         return;
     // Accept this only if the user changed the axis, angle or position but
     // not if >this< item loses focus
@@ -2250,7 +2250,37 @@ void PropertyPlacementItem::propertyBound()
 PROPERTYITEM_SOURCE(Gui::PropertyEditor::PropertyEnumItem)
 
 PropertyEnumItem::PropertyEnumItem()
+    :m_enum(0)
 {
+    if(PropertyView::showAll()) {
+        m_enum = static_cast<PropertyStringListItem*>(PropertyStringListItem::create());
+        m_enum->setParent(this);
+        m_enum->setPropertyName(QLatin1String(QT_TRANSLATE_NOOP("App::Property", "Enum")));
+        this->appendChild(m_enum);
+    }
+}
+
+void PropertyEnumItem::propertyBound()
+{
+    if (m_enum && isBound()) 
+        m_enum->bind(App::ObjectIdentifier(getPath())<<App::ObjectIdentifier::String("Enum"));
+}
+
+void PropertyEnumItem::setEnum(QStringList values)
+{
+    setData(values);
+}
+
+QStringList PropertyEnumItem::getEnum() const
+{
+    QStringList res;
+    auto prop = getFirstProperty();
+    if (prop && prop->getTypeId().isDerivedFrom(App::PropertyEnumeration::getClassTypeId())) {
+        const App::PropertyEnumeration* prop_enum = static_cast<const App::PropertyEnumeration*>(prop);
+        for(int i=0,last=prop_enum->getEnum().maxValue();i<=last;++i)
+            res.push_back(QString::fromUtf8(prop_enum->getEnums()[i]));
+    }
+    return res;
 }
 
 QVariant PropertyEnumItem::value(const App::Property* prop) const
@@ -2258,25 +2288,40 @@ QVariant PropertyEnumItem::value(const App::Property* prop) const
     assert(prop && prop->getTypeId().isDerivedFrom(App::PropertyEnumeration::getClassTypeId()));
 
     const App::PropertyEnumeration* prop_enum = static_cast<const App::PropertyEnumeration*>(prop);
-    const std::vector<std::string>& value = prop_enum->getEnumVector();
-    long currentItem = prop_enum->getValue();
-
-    if (currentItem < 0 || currentItem >= static_cast<long>(value.size()))
+    if(!prop_enum->isValid())
         return QVariant(QString());
-    return QVariant(QString::fromUtf8(value[currentItem].c_str()));
+    return QVariant(QString::fromUtf8(prop_enum->getValueAsString()));
 }
 
 void PropertyEnumItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert(QVariant::StringList))
+    if (hasExpression())
         return;
-    QStringList items = value.toStringList();
-    if (!items.isEmpty()) {
-        QByteArray val = items.front().toUtf8();
-        std::string str = Base::Tools::escapedUnicodeFromUtf8(val);
-        QString data = QString::fromLatin1("u\"%1\"").arg(QString::fromStdString(str));
-        setPropertyValue(data);
+
+    QString data;
+
+    if (value.type() == QVariant::StringList) {
+        QStringList values = value.toStringList();
+        QTextStream str(&data);
+        str << "[";
+        for (QStringList::Iterator it = values.begin(); it != values.end(); ++it) {
+            QString text(*it);
+            text.replace(QString::fromUtf8("'"),QString::fromUtf8("\\'"));
+
+            std::string pystr = Base::Tools::escapedUnicodeFromUtf8(text.toUtf8());
+            pystr = Base::Interpreter().strToPython(pystr.c_str());
+            str << "u\"" << pystr.c_str() << "\", ";
+        }
+        str << "]";
     }
+    else if (value.canConvert(QVariant::String)) {
+        QByteArray val = value.toString().toUtf8();
+        std::string str = Base::Tools::escapedUnicodeFromUtf8(val);
+        data = QString::fromLatin1("u\"%1\"").arg(QString::fromStdString(str));
+    }
+    else
+        return;
+    setPropertyValue(data);
 }
 
 QWidget* PropertyEnumItem::createEditor(QWidget* parent, const QObject* receiver, const char* method) const
@@ -2392,7 +2437,7 @@ QVariant PropertyStringListItem::value(const App::Property* prop) const
 
 void PropertyStringListItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert(QVariant::StringList))
+    if (hasExpression() || !value.canConvert(QVariant::StringList))
         return;
     QStringList values = value.toStringList();
     QString data;
@@ -2469,7 +2514,7 @@ QVariant PropertyFloatListItem::value(const App::Property* prop) const
 
 void PropertyFloatListItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert(QVariant::StringList))
+    if (hasExpression() || !value.canConvert(QVariant::StringList))
         return;
     QStringList values = value.toStringList();
     QString data;
@@ -2544,7 +2589,7 @@ QVariant PropertyIntegerListItem::value(const App::Property* prop) const
 
 void PropertyIntegerListItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert(QVariant::StringList))
+    if (hasExpression() || !value.canConvert(QVariant::StringList))
         return;
     QStringList values = value.toStringList();
     QString data;
@@ -2596,7 +2641,7 @@ QVariant PropertyColorItem::value(const App::Property* prop) const
 
 void PropertyColorItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert<QColor>())
+    if (hasExpression() || !value.canConvert<QColor>())
         return;
     QColor col = value.value<QColor>();
     App::Color val; val.setValue<QColor>(col);
@@ -2888,7 +2933,7 @@ QVariant PropertyMaterialItem::value(const App::Property* prop) const
 
 void PropertyMaterialItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert<Material>())
+    if (hasExpression() || !value.canConvert<Material>())
         return;
 
     Material mat = value.value<Material>();
@@ -3320,7 +3365,7 @@ QVariant PropertyMaterialListItem::value(const App::Property* prop) const
 
 void PropertyMaterialListItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert<QVariantList>())
+    if (hasExpression() || !value.canConvert<QVariantList>())
         return;
 
     QVariantList list = value.toList();
@@ -3441,7 +3486,7 @@ QVariant PropertyFileItem::value(const App::Property* prop) const
 
 void PropertyFileItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert(QVariant::String))
+    if (hasExpression() || !value.canConvert(QVariant::String))
         return;
     QString val = value.toString();
     QString data = QString::fromLatin1("\"%1\"").arg(val);
@@ -3498,7 +3543,7 @@ QVariant PropertyPathItem::value(const App::Property* prop) const
 
 void PropertyPathItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert(QVariant::String))
+    if (hasExpression() || !value.canConvert(QVariant::String))
         return;
     QString val = value.toString();
     QString data = QString::fromLatin1("\"%1\"").arg(val);
@@ -3550,7 +3595,7 @@ QVariant PropertyTransientFileItem::value(const App::Property* prop) const
 
 void PropertyTransientFileItem::setValue(const QVariant& value)
 {
-    if (!value.canConvert(QVariant::String))
+    if (hasExpression() || !value.canConvert(QVariant::String))
         return;
     QString val = value.toString();
     QString data = QString::fromLatin1("\"%1\"").arg(val);
@@ -3808,7 +3853,6 @@ PropertyLinkListItem::PropertyLinkListItem()
 {
 }
 
-// --------------------------------------------------------------------
 
 PropertyItemEditorFactory::PropertyItemEditorFactory()
 {
