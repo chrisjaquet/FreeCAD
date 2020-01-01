@@ -201,6 +201,7 @@ void DlgSheetConf::accept()
         if(!prop) {
             prop = obj->addDynamicProperty("App::PropertyEnumeration", propName.c_str(),
                                 ui->lineEditGroup->text().trimmed().toUtf8().constData());
+            prop->setStatus(App::Property::CopyOnChange,true);
         }
         if(!prop)
             FC_THROWM(Base::RuntimeError, "Failed to add property '" << propName << "'");
