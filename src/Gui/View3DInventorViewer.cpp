@@ -1888,6 +1888,7 @@ void View3DInventorViewer::savePicture(int w, int h, int s, const QColor& bg, QI
     SoCallback* gl = new SoCallback;
     gl->setCallback(setGLWidgetCB, this->getGLWidget());
     root->addChild(gl);
+    root->addChild(pcGroupOnTopSwitch);
     root->addChild(pcViewProviderRoot);
 
 #if !defined(HAVE_QT5_OPENGL)
