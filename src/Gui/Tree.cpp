@@ -363,13 +363,17 @@ TreeWidget::TreeWidget(const char *name, QWidget* parent)
     , myName(name)
 {
     Instances.insert(this);
-    if(!_LastSelectedTreeWidget)
-        _LastSelectedTreeWidget = this;
 
     this->setDragEnabled(true);
     this->setAcceptDrops(true);
     this->setDropIndicatorShown(false);
-    this->setDragDropMode(QTreeWidget::InternalMove);
+
+    // In case two tree views are shown (ComboView and TreeView), we need to
+    // allow drag and drop between them in order for StdTreeDrag command to
+    // work. So, we cannot use InternalMove
+    //
+    // this->setDragDropMode(QTreeWidget::InternalMove);
+
     this->setRootIsDecorated(false);
     this->setColumnCount(2);
     this->setItemDelegate(new TreeWidgetEditDelegate(this));
@@ -483,6 +487,7 @@ TreeWidget::TreeWidget(const char *name, QWidget* parent)
             this, SLOT(onPreSelectTimer()));
     connect(this->selectTimer, SIGNAL(timeout()),
             this, SLOT(onSelectTimer()));
+    connect(this, SIGNAL(pressed(const QModelIndex &)), SLOT(onItemPressed()));
     preselectTime.start();
 
     setupText();
@@ -1026,6 +1031,10 @@ void TreeWidget::selectAllInstances(const ViewProviderDocumentObject &vpd) {
         v.second->selectAllInstances(vpd);
 }
 
+void TreeWidget::onItemPressed() {
+    _LastSelectedTreeWidget = this;
+}
+
 TreeWidget *TreeWidget::instance() {
     auto res = _LastSelectedTreeWidget;
     if(res && res->isVisible())
@@ -1279,8 +1288,6 @@ void TreeWidget::startDragging() {
 
     setState(DraggingState);
     startDrag(model()->supportedDragActions());
-    setState(NoState);
-    stopAutoScroll();
 }
 
 void TreeWidget::startDrag(Qt::DropActions supportedActions)
@@ -1289,6 +1296,19 @@ void TreeWidget::startDrag(Qt::DropActions supportedActions)
     if(_DragEventFilter) {
         _DragEventFilter = false;
         qApp->removeEventFilter(this);
+    }
+
+    // The following code is necessary for dragging between the tree view to
+    // work. Note that the standard behaivor of drag and drop between different
+    // QTreeWidget is to move the item from one to the other, and obviously we
+    // don't want that. The trick is to NOT call QDropEvent::acceptDropAction()
+    // inside dropEvent(), and add the following code to manually terminate the
+    // the drop.
+    for(auto tree : Instances) {
+        if(tree->state() == DraggingState) {
+            tree->setState(NoState);
+            tree->stopAutoScroll();
+        }
     }
 }
 
@@ -2532,9 +2552,8 @@ void TreeWidget::onItemExpanded(QTreeWidgetItem * item)
 void TreeWidget::scrollItemToTop()
 {
     auto doc = Application::Instance->activeDocument();
-    for(auto tree : Instances) {
-        if(!tree->isConnectionAttached() || tree->isConnectionBlocked()) 
-            continue;
+    auto tree = instance();
+    if (tree && tree->isConnectionAttached() && !tree->isConnectionBlocked()) {
 
         tree->_updateStatus(false);
 
@@ -2690,8 +2709,6 @@ void TreeWidget::onItemSelectionChanged ()
 
     preselectTimer->stop();
 
-    _LastSelectedTreeWidget = this;
-
     // block tmp. the connection to avoid to notify us ourself
     bool lock = this->blockConnection(true);
 
@@ -2792,7 +2809,7 @@ void TreeWidget::onSelectTimer() {
 
     _updateStatus(false);
 
-    bool syncSelect = TreeParams::Instance()->SyncSelection();
+    bool syncSelect = instance()==this && TreeParams::Instance()->SyncSelection();
     bool locked = this->blockConnection(true);
     if(Selection().hasSelection()) {
         for(auto &v : DocumentMap) {
