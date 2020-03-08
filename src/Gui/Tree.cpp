@@ -681,7 +681,6 @@ void TreeWidget::itemSearch(const QString &text, bool select) {
         return;
     }
     std::string txt(text.toUtf8().constData());
-    FC_MSG(txt);
     try {
         if(txt.empty())
             return;
