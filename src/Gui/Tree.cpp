@@ -565,6 +565,10 @@ void TreeWidget::resetItemSearch() {
 }
 
 void TreeWidget::startItemSearch(QLineEdit *edit) {
+
+    if(TreeParams::Instance()->RecordSelection())
+        Selection().selStackPush();
+
     resetItemSearch();
     searchDoc = 0;
     searchContextDoc = 0;
@@ -670,18 +674,27 @@ void TreeWidget::itemSearch(const QString &text, bool select) {
             FC_TRACE("item " << txt << " not found in " << doc->getName());
             return;
         }
+
         scrollToItem(item);
+        // Prevent preselection triggered by onItemEntered()
+        preselectTimer->stop();
 
         SelectionNoTopParentCheck guard;
+
         Selection().setPreselect(obj->getDocument()->getName(),
                 obj->getNameInDocument(), subname.c_str(),0,0,0,2);
-        if(select) {
-            Gui::Selection().selStackPush();
+
+        if(select || TreeParams::Instance()->SyncView()) {
             Gui::Selection().clearSelection();
             Gui::Selection().addSelection(obj->getDocument()->getName(),
                     obj->getNameInDocument(),subname.c_str());
-            Gui::Selection().selStackPush();
-        }else{
+
+            currentDocItem = item->myOwner;
+            syncView(item->object());
+            currentDocItem = nullptr;
+        }
+
+        if (!select) {
             searchObject = item->object()->getObject();
             item->setBackground(0, QColor(255, 255, 0, 100));
         }
@@ -2963,6 +2976,7 @@ void TreePanel::hideEditor()
 void TreePanel::itemSearch(const QString &text)
 {
     this->treeWidget->itemSearch(text,false);
+    this->searchBox->setFocus();
 }
 
 // ----------------------------------------------------------------------------
