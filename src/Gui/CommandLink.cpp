@@ -747,14 +747,9 @@ void StdCmdLinkSelectLinked::activated(int)
     Selection().clearCompleteSelection();
     if(subname.size()) {
         Selection().addSelection(linked->getDocument()->getName(),linked->getNameInDocument(),subname.c_str());
-        auto doc = Application::Instance->getDocument(linked->getDocument());
-        if(doc) {
-            auto vp = dynamic_cast<ViewProviderDocumentObject*>(Application::Instance->getViewProvider(linked));
-            doc->setActiveView(vp);
-        }
+        TreeWidget::scrollItemToTop();
     } else {
-        for(auto tree : getMainWindow()->findChildren<TreeWidget*>())
-            tree->selectLinkedObject(linked);
+        TreeWidget::selectLinkedObject(linked);
     }
     Selection().selStackPush();
 }
@@ -788,8 +783,7 @@ void StdCmdLinkSelectLinkedFinal::activated(int) {
     }
     Selection().selStackPush();
     Selection().clearCompleteSelection();
-    for(auto tree : getMainWindow()->findChildren<TreeWidget*>())
-        tree->selectLinkedObject(linked);
+    TreeWidget::selectLinkedObject(linked);
     Selection().selStackPush();
 }
 
@@ -823,8 +817,7 @@ void StdCmdLinkSelectAllLinks::activated(int)
         return;
     Selection().selStackPush();
     Selection().clearCompleteSelection();
-    for(auto tree : getMainWindow()->findChildren<TreeWidget*>())
-        tree->selectAllLinks(sels[0].pObject);
+    TreeWidget::selectAllLinks(sels[0].pObject);
     Selection().selStackPush();
 }
 
