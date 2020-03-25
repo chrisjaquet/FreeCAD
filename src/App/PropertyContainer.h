@@ -224,6 +224,7 @@ public:
   }
 
   friend class Property;
+  friend class TransactionObject;
   friend class DynamicProperty;
 
 
@@ -239,6 +240,10 @@ protected:
 
   virtual void handleChangedPropertyName(Base::XMLReader &reader, const char * TypeName, const char *PropName);
   virtual void handleChangedPropertyType(Base::XMLReader &reader, const char * TypeName, Property * prop);
+
+  virtual bool isOnChangeBlocked() const {
+      return false;
+  }
 
 private:
   // forbidden
