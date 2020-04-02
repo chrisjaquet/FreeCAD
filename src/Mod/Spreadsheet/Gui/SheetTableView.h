@@ -90,6 +90,8 @@ protected:
 
     void contextMenuEvent (QContextMenuEvent * e);
 
+    void _copySelection(const std::vector<App::Range> &ranges, bool copy);
+
     QModelIndex currentEditIndex;
     Spreadsheet::Sheet * sheet;
 
